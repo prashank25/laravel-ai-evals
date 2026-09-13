@@ -1,0 +1,47 @@
+{
+    "name": "prashank/laravel-ai-evals",
+    "description": "PHPUnit evals for laravel/ai agents: LLM judges, tool trajectories, and scorers.",
+    "type": "library",
+    "license": "MIT",
+    "keywords": ["laravel", "ai", "evals", "phpunit"],
+    "authors": [
+        {
+            "name": "Prashank Abhishek",
+            "email": "oss@prashank.com"
+        }
+    ],
+    "require": {
+        "php": "^8.3",
+        "laravel/ai": "^0.11.2",
+        "phpunit/phpunit": "^11.0|^12.0|^13.0"
+    },
+    "require-dev": {
+        "laravel/mcp": "^0.8",
+        "laravel/pint": "^1.0",
+        "orchestra/testbench": "^10.0"
+    },
+    "autoload": {
+        "psr-4": {
+            "Prashank\\AiEvals\\": "src/"
+        }
+    },
+    "autoload-dev": {
+        "psr-4": {
+            "Prashank\\AiEvals\\Tests\\": "tests/"
+        }
+    },
+    "scripts": {
+        "test": "phpunit",
+        "lint": "pint"
+    },
+    "config": {
+        "sort-packages": true
+    },
+    "extra": {
+        "laravel": {
+            "providers": [
+                "Prashank\\AiEvals\\AiEvalsServiceProvider"
+            ]
+        }
+    }
+}
