@@ -141,6 +141,6 @@ class ScorersTest extends TestCase
 
     private function sample(string $input, string $output): Sample
     {
-        return new Sample($input, $output, new ToolTrace([], [], false));
+        return new Sample($input, $output, new ToolTrace(exposed: [], calls: [], providerDataAvailable: false));
     }
 }

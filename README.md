@@ -29,7 +29,7 @@ php artisan vendor:publish --tag=ai-evals-config
 | `AI_EVALS_JUDGE_MODEL` | `gpt-5.6-luna` | judge, relevance, safety, factuality |
 | `AI_EVALS_EMBEDDINGS_PROVIDER` | `openai` | semantic similarity |
 | `AI_EVALS_EMBEDDINGS_MODEL` | `text-embedding-3-small` | semantic similarity |
-| `AI_EVALS_VERBOSE` | `false` | prints every score and the judge's reasoning |
+| `AI_EVALS_VERBOSE` | `false` | prints every score with the serving model, token usage and the judge's reasoning |
 
 Any provider configured in laravel/ai can be used.
 
@@ -80,7 +80,18 @@ $samples = $this->promptRepeatedly($agent, 'prompt', times: 3);
 Every assertion accepts a single `Sample` or an array of samples. With an array, every sample must pass.
 
 `Sample` exposes `input`, `output`, `structured` (for structured agents) and `tools`, a `ToolTrace` of every
-tool the model called in order, including provider-side tools such as web search.
+tool the model called in order, including provider-side tools such as web search. It also records which
+`provider` and `model` served the run, any `failovers` the SDK performed to get there, and the token `usage`
+summed across every step.
+
+To pin a run to one provider instead of the agent's own configuration, pass `provider` and `model`:
+
+```php
+$sample = $this->prompt($agent, 'prompt', provider: Lab::OpenAI, model: 'gpt-5.4');
+```
+
+A pinned run never fails over. Leave `model` out to use that provider's default model, the same choice the SDK
+makes for a chain entry without a model; the agent's `#[Model]` attribute is not applied to a pinned provider.
 
 ### Assertions
 
@@ -98,6 +109,9 @@ tool the model called in order, including provider-side tools such as web search
 | `assertOutputEquals($samples, $expected)` | Exact output match. |
 | `assertOutputIsJson($samples)` | The output is valid JSON. |
 | `assertPassesScorer($samples, $scorer, $threshold = 0.7, $expected = null)` | Any custom `Scorer`. |
+| `assertServedBy($samples, $provider = null, $model = null)` | The response came from the given provider, model, or both. A model also matches its dated snapshots. |
+| `assertDidNotFailOver($samples)` | The SDK did not have to fail over to another provider. |
+| `assertFailedOver($samples, $from = null)` | The SDK failed over at least once, from the given provider when given. |
 
 The tool assertions default to a threshold of 1.0, stricter than the Pest plugin's 0.7, so a partial
 trajectory fails unless you lower it.
@@ -116,6 +130,90 @@ $this->assertTrajectory($samples, ['list_statuses'], strictOrder: false);
 
 Provider tools are asserted the same way, by class (`Laravel\Ai\Providers\Tools\WebSearch::class`) or by the
 provider's call name (`web_search_call`).
+
+### Running an eval against every provider in the failover chain
+
+Agents that declare a failover chain (`#[Provider([Lab::Anthropic->value => '...', Lab::OpenAI->value => '...'])]`)
+only ever run on the fallback when the primary is down, so nothing checks that the fallback model passes the
+same evals. Tag the class with the agent and the test with the `providerChain` data provider:
+
+```php
+use PHPUnit\Framework\Attributes\DataProvider;
+use Prashank\AiEvals\Attributes\AgentUnderTest;
+use Prashank\AiEvals\Support\ProviderHop;
+
+#[AgentUnderTest(SupportAgent::class)]
+class SupportAgentEvalTest extends TestCase
+{
+    use EvaluatesAgents;
+
+    #[Test]
+    #[DataProvider('providerChain')]
+    public function answers_refund_questions_from_the_policy(ProviderHop $hop)
+    {
+        $sample = $this->prompt(new SupportAgent, 'Can I get a refund after 30 days?');
+
+        $this->assertPassesJudge($sample, 'The agent says refunds are only available within 30 days.');
+    }
+}
+```
+
+The test runs once per provider / model in the chain and `prompt()` pins each run to the current hop, so the
+body needs no changes. The `$hop` parameter is only required on PHPUnit 12 and later, which warn when a data
+set carries more values than the method accepts; on PHPUnit 11 the method can stay parameterless. Data sets
+are named `provider/model`, so they show up in the output as `with data set "openai/gpt-5.4"` and can be
+selected with `--filter`:
+
+```bash
+php artisan test tests/Evals --filter='openai'                       # only the fallback hops
+php artisan test tests/Evals --filter='answers_refund.*anthropic'    # one test on the primary
+```
+
+The chain is resolved with the SDK's own rules through reflection, without booting the application, because
+PHPUnit collects data providers before any test runs. Agents must therefore declare the chain with the
+`#[Provider]` attribute or a `provider()` method that does not depend on the constructor or the container.
+`#[AgentUnderTest]` may sit on a shared base class, and the data provider is opt-in per test, so an eval that
+is not worth running on every hop simply leaves the attribute off.
+
+To run a test on hand-picked providers instead of the whole chain, use `#[TestWith]` and pass the values on:
+
+```php
+#[Test]
+#[TestWith([Lab::Anthropic, 'claude-sonnet-5'], 'anthropic')]
+#[TestWith([Lab::OpenAI, 'gpt-5.4'], 'openai')]
+public function answers_refund_questions_from_the_policy(Lab $provider, string $model)
+{
+    $sample = $this->prompt(new SupportAgent, 'Can I get a refund after 30 days?', provider: $provider, model: $model);
+
+    // ...
+}
+```
+
+Without the data provider, `prompt()` runs the agent exactly as production does, failing over through the
+chain, and the sample records what happened:
+
+```php
+$this->assertServedBy($sample, Lab::Anthropic, 'claude-sonnet-5');
+$this->assertDidNotFailOver($sample);
+$this->assertFailedOver($sample, from: Lab::Anthropic);
+```
+
+`assertServedBy` takes a provider, a model (`model: 'gpt-5.4'`), or both. Providers often report the dated
+snapshot an alias resolved to, such as `gpt-5.4-2026-03-05`, so a model also matches its dated snapshots, but
+never a sibling like `gpt-5.4-mini`. Pass the snapshot name to require that exact one.
+
+Failure messages name the serving model, for example `Sample #1 [openai/gpt-5.4]`, and so does the verbose
+output, together with the token usage summed across the run and any failovers:
+
+```
+PASS LlmJudge 0.9 / threshold 0.7
+Input:     Can I get a refund after 30 days?
+Model:     openai/gpt-5.4 (failed over from anthropic/claude-sonnet-5)
+Usage:     4,812 in / 233 out, 3,900 cache read
+Tools:     lookup_refund_policy
+Output:    Refunds are only available within 30 days of purchase...
+Reasoning: The answer states the 30 day limit and promises no exception.
+```
 
 ### Custom scorers
 

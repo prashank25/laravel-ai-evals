@@ -87,7 +87,7 @@ final class ProviderResponseParser
         return match (true) {
             is_array($item['action'] ?? null) => $item['action'],
             is_array($item['queries'] ?? null) => ['queries' => $item['queries']],
-            is_string($item['arguments'] ?? null) => json_decode($item['arguments'], true) ?? [],
+            is_string($item['arguments'] ?? null) => json_decode($item['arguments'], associative: true) ?? [],
             default => null,
         };
     }

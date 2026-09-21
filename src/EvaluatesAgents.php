@@ -5,6 +5,7 @@ namespace Prashank\AiEvals;
 use Closure;
 use InvalidArgumentException;
 use Laravel\Ai\Contracts\Agent;
+use Laravel\Ai\Enums\Lab;
 use Prashank\AiEvals\Scorers\AgentTrajectory;
 use Prashank\AiEvals\Scorers\Factuality;
 use Prashank\AiEvals\Scorers\LlmJudge;
@@ -13,6 +14,12 @@ use Prashank\AiEvals\Scorers\Safety;
 use Prashank\AiEvals\Scorers\Scorer;
 use Prashank\AiEvals\Scorers\SemanticSimilarity;
 use Prashank\AiEvals\Scorers\ToolCallMatch;
+use Prashank\AiEvals\Support\Failover;
+use Prashank\AiEvals\Support\FailoverRecorder;
+use Prashank\AiEvals\Support\ProviderChain;
+use Prashank\AiEvals\Support\ProviderHop;
+use Prashank\AiEvals\Support\SampleList;
+use Prashank\AiEvals\Support\VerboseReport;
 use Prashank\AiEvals\Tools\InvokedToolRecorder;
 
 /**
@@ -25,22 +32,51 @@ use Prashank\AiEvals\Tools\InvokedToolRecorder;
  * The judge defaults to openai / gpt-5.6-luna and embeddings to openai / text-embedding-3-small.
  * Override with AI_EVALS_JUDGE_PROVIDER, AI_EVALS_JUDGE_MODEL, AI_EVALS_EMBEDDINGS_PROVIDER
  * and AI_EVALS_EMBEDDINGS_MODEL, or publish and edit config/ai-evals.php.
+ *
+ * To run an eval against every provider in the agent's failover chain, tag the class with
+ * #[AgentUnderTest(MyAgent::class)], the test with #[DataProvider('providerChain')] and give the test a
+ * ProviderHop $hop parameter. The body stays the same: prompt() picks the hop up from the data set and
+ * pins the run to that provider, so the SDK's own failover is out of the picture for that sample.
  */
 trait EvaluatesAgents
 {
     /**
-     * Run the agent once and capture what it produced.
+     * One data set per provider / model in the agent under test's failover chain, named "provider/model".
+     *
+     * @return array<string, array{ProviderHop}>
      */
-    protected function prompt(Agent $agent, string $prompt, array $attachments = []): Sample
+    public static function providerChain(): array
     {
-        $recorder = InvokedToolRecorder::for(app());
+        return ProviderChain::dataSetsForTestClass(static::class);
+    }
+
+    /**
+     * Run the agent once and capture what it produced.
+     *
+     * Without an explicit provider the run comes from a providerChain data set when there is one, and
+     * otherwise from the agent's own configuration, failing over as it would in production.
+     */
+    protected function prompt(Agent $agent, string $prompt, array $attachments = [], ProviderHop|Lab|string|null $provider = null, ?string $model = null): Sample
+    {
+        $hop = ProviderHop::resolve($this, $provider, $model);
+        $tools = InvokedToolRecorder::for(app());
+        $failovers = FailoverRecorder::for(app());
 
         try {
-            $response = $agent->prompt($prompt, $attachments);
+            // A single-entry map keeps the SDK on the same resolution branch as the agent's chain: #[Model]
+            // is ignored and a null model means the provider's default, exactly as it would in production.
+            $response = $agent->prompt($prompt, $attachments, $hop === null ? null : [$hop->provider => $hop->model]);
 
-            return Sample::fromResponse($prompt, $response, $agent, $recorder->invokedDuring($response->invocationId));
+            return Sample::fromResponse(
+                $prompt,
+                $response,
+                $agent,
+                $tools->invokedDuring($response->invocationId),
+                $failovers->during($response->invocationId),
+            );
         } finally {
-            $recorder->flush();
+            $tools->flush();
+            $failovers->flush();
         }
     }
 
@@ -49,13 +85,79 @@ trait EvaluatesAgents
      *
      * @return array<int, Sample>
      */
-    protected function promptRepeatedly(Agent $agent, string $prompt, int $times, array $attachments = []): array
+    protected function promptRepeatedly(Agent $agent, string $prompt, int $times, array $attachments = [], ProviderHop|Lab|string|null $provider = null, ?string $model = null): array
     {
         if ($times < 1) {
             throw new InvalidArgumentException("promptRepeatedly() needs at least one run, {$times} given.");
         }
 
-        return array_map(fn (): Sample => $this->prompt($agent, $prompt, $attachments), range(1, $times));
+        return array_map(fn (): Sample => $this->prompt($agent, $prompt, $attachments, $provider, $model), range(1, $times));
+    }
+
+    /**
+     * Every sample was served by the given provider, the given model, or both.
+     *
+     * A model also matches a dated snapshot of itself (gpt-5.4 matches gpt-5.4-2026-03-05), since providers
+     * often report the snapshot an alias resolved to. Pass the snapshot name to require that exact one.
+     *
+     * @param  Sample|array<int, Sample>  $samples
+     */
+    protected function assertServedBy(Sample|array $samples, Lab|string|null $provider = null, ?string $model = null): void
+    {
+        if ($provider === null && $model === null) {
+            throw new InvalidArgumentException('assertServedBy() needs a provider, a model, or both.');
+        }
+
+        $provider = $provider instanceof Lab ? $provider->value : $provider;
+        $expected = implode('/', array_filter([$provider, $model]));
+
+        foreach (SampleList::from($samples) as $index => $sample) {
+            $actual = $sample->servedBy() ?? 'an unknown provider';
+
+            if ($provider !== null) {
+                $this->assertSame($provider, $sample->provider, $sample->label($index)." was served by {$actual}, expected {$expected}.");
+            }
+
+            if ($model !== null) {
+                $this->assertTrue($sample->servedByModel($model), $sample->label($index)." was served by {$actual}, expected {$expected} or a dated snapshot of it.");
+            }
+        }
+    }
+
+    /**
+     * No sample needed the SDK to fail over to another provider.
+     *
+     * @param  Sample|array<int, Sample>  $samples
+     */
+    protected function assertDidNotFailOver(Sample|array $samples): void
+    {
+        foreach (SampleList::from($samples) as $index => $sample) {
+            $skipped = implode(', ', array_map(fn (Failover $failover): string => $failover->label(), $sample->failovers));
+
+            $this->assertFalse($sample->failedOver(), $sample->label($index)." failed over from {$skipped}.");
+        }
+    }
+
+    /**
+     * Every sample failed over at least once, from the given provider when one is given.
+     *
+     * @param  Sample|array<int, Sample>  $samples
+     */
+    protected function assertFailedOver(Sample|array $samples, Lab|string|null $from = null): void
+    {
+        $from = $from instanceof Lab ? $from->value : $from;
+
+        foreach (SampleList::from($samples) as $index => $sample) {
+            $this->assertTrue($sample->failedOver(), $sample->label($index).' did not fail over.');
+
+            if ($from === null) {
+                continue;
+            }
+
+            $skipped = array_map(fn (Failover $failover): string => $failover->provider, $sample->failovers);
+
+            $this->assertContains($from, $skipped, $sample->label($index)." did not fail over from {$from}; it failed over from ".implode(', ', $skipped).'.');
+        }
     }
 
     /**
@@ -123,9 +225,9 @@ trait EvaluatesAgents
      */
     protected function assertOutputContains(Sample|array $samples, string ...$needles): void
     {
-        foreach ($this->samples($samples) as $index => $sample) {
+        foreach (SampleList::from($samples) as $index => $sample) {
             foreach ($needles as $needle) {
-                $this->assertStringContainsString($needle, $sample->output, 'Sample #'.($index + 1)." does not contain '{$needle}'.");
+                $this->assertStringContainsString($needle, $sample->output, $sample->label($index)." does not contain '{$needle}'.");
             }
         }
     }
@@ -135,8 +237,8 @@ trait EvaluatesAgents
      */
     protected function assertOutputEquals(Sample|array $samples, string $expected): void
     {
-        foreach ($this->samples($samples) as $index => $sample) {
-            $this->assertSame($expected, $sample->output, 'Sample #'.($index + 1).' does not match the expected output.');
+        foreach (SampleList::from($samples) as $index => $sample) {
+            $this->assertSame($expected, $sample->output, $sample->label($index).' does not match the expected output.');
         }
     }
 
@@ -145,8 +247,8 @@ trait EvaluatesAgents
      */
     protected function assertOutputIsJson(Sample|array $samples): void
     {
-        foreach ($this->samples($samples) as $index => $sample) {
-            $this->assertJson($sample->output, 'Sample #'.($index + 1).' is not valid JSON.');
+        foreach (SampleList::from($samples) as $index => $sample) {
+            $this->assertJson($sample->output, $sample->label($index).' is not valid JSON.');
         }
     }
 
@@ -155,8 +257,8 @@ trait EvaluatesAgents
      */
     protected function assertOutputMatches(Sample|array $samples, string $pattern): void
     {
-        foreach ($this->samples($samples) as $index => $sample) {
-            $this->assertMatchesRegularExpression($pattern, $sample->output, 'Sample #'.($index + 1)." does not match '{$pattern}'.");
+        foreach (SampleList::from($samples) as $index => $sample) {
+            $this->assertMatchesRegularExpression($pattern, $sample->output, $sample->label($index)." does not match '{$pattern}'.");
         }
     }
 
@@ -167,16 +269,15 @@ trait EvaluatesAgents
      */
     protected function assertPassesScorer(Sample|array $samples, Scorer $scorer, float $threshold = Scorer::DEFAULT_THRESHOLD, ?string $expected = null): void
     {
-        $samples = $this->samples($samples);
+        $samples = SampleList::from($samples);
         $scorerName = class_basename($scorer);
 
         foreach ($samples as $index => $sample) {
             $result = $scorer->score($sample, $expected);
-            $passed = $result->passed($threshold);
 
-            $this->report($scorerName, $sample, $result->score, $threshold, $passed, $result->reasoning, $index + 1, count($samples));
+            VerboseReport::write($scorerName, $sample, $result, $threshold, $index + 1, count($samples));
 
-            $prefix = count($samples) > 1 ? 'Sample #'.($index + 1).': ' : '';
+            $prefix = count($samples) > 1 || $sample->servedBy() !== null ? $sample->label($index).': ' : '';
 
             $this->assertGreaterThanOrEqual(
                 $threshold,
@@ -184,41 +285,5 @@ trait EvaluatesAgents
                 "{$prefix}{$scorerName} scored {$result->score} (threshold {$threshold}). {$result->reasoning}",
             );
         }
-    }
-
-    /**
-     * @param  Sample|array<int, Sample>  $samples
-     * @return array<int, Sample>
-     */
-    private function samples(Sample|array $samples): array
-    {
-        $samples = array_values($samples instanceof Sample ? [$samples] : $samples);
-
-        $this->assertNotEmpty($samples, 'No samples to evaluate.');
-
-        return $samples;
-    }
-
-    private function report(string $scorer, Sample $sample, float $score, float $threshold, bool $passed, string $reasoning, int $index, int $total): void
-    {
-        if (! config('ai-evals.verbose')) {
-            return;
-        }
-
-        $status = $passed ? 'PASS' : 'FAIL';
-        $sampleSuffix = $total > 1 ? " (sample {$index}/{$total})" : '';
-        $toolNames = implode(', ', $sample->toolNames()) ?: 'none';
-
-        fwrite(STDERR, implode("\n", [
-            '',
-            str_repeat('─', 72),
-            "{$status} {$scorer} {$score} / threshold {$threshold}{$sampleSuffix}",
-            'Input:     '.mb_strimwidth($sample->input, 0, 160, '…'),
-            'Tools:     '.$toolNames,
-            'Output:    '.mb_strimwidth(str_replace("\n", ' ', $sample->output), 0, 240, '…'),
-            'Reasoning: '.$reasoning,
-            str_repeat('─', 72),
-            '',
-        ]));
     }
 }

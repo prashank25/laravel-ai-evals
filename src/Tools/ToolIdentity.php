@@ -68,11 +68,11 @@ final class ToolIdentity
             $tool = self::normalise($tool);
 
             if ($tool instanceof ToolSearch) {
-                $exposed[] = new ExposedTool(ToolSearch::class, null, fromProvider: true);
+                $exposed[] = new ExposedTool(ToolSearch::class, name: null, fromProvider: true);
 
                 array_push($exposed, ...self::exposed($tool->tools));
             } elseif ($tool instanceof ProviderTool) {
-                $exposed[] = new ExposedTool($tool::class, null, fromProvider: true);
+                $exposed[] = new ExposedTool($tool::class, name: null, fromProvider: true);
             } elseif ($tool instanceof Tool) {
                 $exposed[] = self::identify($tool);
             }

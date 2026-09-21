@@ -53,7 +53,7 @@ final readonly class ToolTrace
 
         $steps = $response->steps->all();
         $parsedSteps = array_map(fn (Step $step): ?array => ProviderResponseParser::parse($step->raw), $steps);
-        $rawAvailable = $steps !== [] && ! in_array(null, $parsedSteps, true);
+        $rawAvailable = $steps !== [] && ! in_array(null, $parsedSteps, strict: true);
 
         $calls = $rawAvailable
             ? self::callsFromRawSteps($steps, $parsedSteps, $classesByName)
@@ -250,7 +250,7 @@ final readonly class ToolTrace
             }
 
             foreach ($step->toolCalls as $toolCall) {
-                if (! in_array($toolCall->id, $matchedIds, true)) {
+                if (! in_array($toolCall->id, $matchedIds, strict: true)) {
                     $calls[] = self::fromSdkCall($toolCall, $classesByName, count($calls));
                 }
             }
