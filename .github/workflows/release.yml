@@ -1,0 +1,59 @@
+name: Release
+
+on:
+  workflow_dispatch:
+    inputs:
+      bump:
+        description: Part of the latest version to bump
+        type: choice
+        required: true
+        default: patch
+        options: [patch, minor, major]
+
+permissions:
+  contents: write
+
+concurrency: release
+
+jobs:
+  tests:
+    uses: ./.github/workflows/tests.yml
+
+  release:
+    needs: tests
+    # Only main is ever released, whichever branch the workflow was started from
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          # Tags are needed to find the latest version
+          fetch-depth: 0
+
+      - name: Work out the next version
+        id: version
+        run: |
+          latest=$(git describe --tags --abbrev=0 --match 'v*' 2> /dev/null || echo v0.0.0)
+
+          IFS=. read -r major minor patch <<< "${latest#v}"
+
+          case "$BUMP" in
+            major) version="v$((major + 1)).0.0" ;;
+            minor) version="v$major.$((minor + 1)).0" ;;
+            patch) version="v$major.$minor.$((patch + 1))" ;;
+          esac
+
+          echo "Bumping $latest to $version"
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+        env:
+          BUMP: ${{ inputs.bump }}
+
+      - name: Tag and publish the release
+        run: |
+          git tag "$VERSION"
+          git push origin "$VERSION"
+          gh release create "$VERSION" --generate-notes --verify-tag
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
+          GH_TOKEN: ${{ github.token }}
