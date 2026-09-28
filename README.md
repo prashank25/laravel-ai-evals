@@ -5,7 +5,12 @@ semantic similarity, tool call and trajectory assertions. A port of the Pest eva
 
 ## Requirements
 
-- PHP 8.3+, Laravel 12+, laravel/ai 0.11+, PHPUnit 11, 12 or 13
+- PHP 8.3+, Laravel 12+, PHPUnit 11, 12 or 13
+
+| laravel/ai | laravel-ai-evals |
+| --- | --- |
+| 1.x | 1.x |
+| 0.11 | 0.x |
 
 ## Install
 

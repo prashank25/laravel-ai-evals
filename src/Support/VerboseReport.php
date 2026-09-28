@@ -2,7 +2,7 @@
 
 namespace Prashank\AiEvals\Support;
 
-use Laravel\Ai\Responses\Data\Usage;
+use Laravel\Ai\Responses\Data\TextUsage;
 use Prashank\AiEvals\Sample;
 use Prashank\AiEvals\Scorers\ScorerResult;
 
@@ -42,7 +42,7 @@ final class VerboseReport
     /**
      * "1,234 in / 56 out", followed by the cache and reasoning counts that are non-zero.
      */
-    public static function describeUsage(Usage $usage): string
+    public static function describeUsage(TextUsage $usage): string
     {
         $extras = array_filter([
             'cache read' => $usage->cacheReadInputTokens,
@@ -50,7 +50,7 @@ final class VerboseReport
             'reasoning' => $usage->reasoningTokens,
         ]);
 
-        $description = number_format($usage->promptTokens).' in / '.number_format($usage->completionTokens).' out';
+        $description = number_format($usage->inputTokens).' in / '.number_format($usage->outputTokens).' out';
 
         foreach ($extras as $label => $tokens) {
             $description .= ', '.number_format($tokens)." {$label}";

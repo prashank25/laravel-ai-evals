@@ -1,7 +1,6 @@
 # Laravel AI Evals
 
-PHPUnit port of the Pest evals plugin for `laravel/ai` agents. Developed against a consuming app, which
-installs it through a symlinked Composer path repository, so edits here are live there immediately.
+PHPUnit port of the Pest evals plugin for `laravel/ai` agents.
 
 ## Scope rules
 
@@ -18,8 +17,6 @@ installs it through a symlinked Composer path repository, so edits here are live
 ## Working here
 
 - Tests: `composer test`. Formatting: `composer lint` (Pint, laravel preset).
-- After changing `composer.json` here, run `composer update prashank/laravel-ai-evals` in the consuming app so
-  package discovery picks it up. Source changes need nothing.
 - Do not commit unless asked. Commit messages are one or two plain sentences, no bullet lists.
 - Use `#[Test]` attributes, verbose test names, and local variables instead of shared fixtures.
 
@@ -33,6 +30,3 @@ installs it through a symlinked Composer path repository, so edits here are live
   `Step->raw`, parsed by `ProviderResponseParser`.
 - `Agent::fake([...])` consumes its queue across prompts and runs real tool handlers, so it dispatches
   `InvokingTool`.
-- Known laravel/ai 0.11 issues (not ours to fix): Anthropic occasionally drops connections (cURL 52/56), and
-  failover from Anthropic to OpenAI breaks on histories with tool calls because OpenAI needs a `call_id` that
-  Anthropic-originated history lacks.

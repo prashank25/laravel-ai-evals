@@ -5,7 +5,7 @@ namespace Prashank\AiEvals\Tests;
 use InvalidArgumentException;
 use Laravel\Ai\Contracts\Agent;
 use Laravel\Ai\Promptable;
-use Laravel\Ai\Responses\Data\Usage;
+use Laravel\Ai\Responses\Data\TextUsage;
 use PHPUnit\Framework\AssertionFailedError;
 use PHPUnit\Framework\Attributes\Test;
 use Prashank\AiEvals\EvaluatesAgents;
@@ -39,17 +39,17 @@ class EvaluatesAgentsTest extends TestCase
 
         $sample = $this->prompt(new AssertionTestAgent, 'Capital of France?');
 
-        $this->assertInstanceOf(Usage::class, $sample->usage);
-        $this->assertSame(0, $sample->usage->promptTokens);
+        $this->assertInstanceOf(TextUsage::class, $sample->usage);
+        $this->assertSame(0, $sample->usage->inputTokens);
     }
 
     #[Test]
     public function usage_is_described_as_in_and_out_tokens_plus_non_zero_extras()
     {
-        $this->assertSame('1,234 in / 56 out', VerboseReport::describeUsage(new Usage(promptTokens: 1234, completionTokens: 56)));
+        $this->assertSame('1,234 in / 56 out', VerboseReport::describeUsage(new TextUsage(inputTokens: 1234, outputTokens: 56)));
         $this->assertSame(
             '1,234 in / 56 out, 1,000 cache read, 7 reasoning',
-            VerboseReport::describeUsage(new Usage(promptTokens: 1234, completionTokens: 56, cacheReadInputTokens: 1000, reasoningTokens: 7)),
+            VerboseReport::describeUsage(new TextUsage(inputTokens: 1234, outputTokens: 56, cacheReadInputTokens: 1000, reasoningTokens: 7)),
         );
     }
 

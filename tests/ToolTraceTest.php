@@ -19,8 +19,8 @@ use Laravel\Ai\Responses\AgentResponse;
 use Laravel\Ai\Responses\Data\FinishReason;
 use Laravel\Ai\Responses\Data\Meta;
 use Laravel\Ai\Responses\Data\Step;
+use Laravel\Ai\Responses\Data\TextUsage;
 use Laravel\Ai\Responses\Data\ToolCall;
-use Laravel\Ai\Responses\Data\Usage;
 use Laravel\Ai\Tools\AgentTool;
 use Laravel\Ai\Tools\McpServerTool;
 use Laravel\Ai\Tools\Request;
@@ -136,7 +136,7 @@ class ToolTraceTest extends TestCase
     public function falls_back_to_sdk_tool_calls_when_no_raw_step_data_exists()
     {
         $agent = new TraceTestAgent([new TraceTestTool]);
-        $response = (new AgentResponse('inv', 'done', new Usage, new Meta))
+        $response = (new AgentResponse('inv', 'done', new TextUsage, new Meta))
             ->withToolCallsAndResults(collect([new ToolCall('c1', 'trace_test_tool', ['id' => 'abc'])]), collect());
 
         $trace = ToolTrace::record($agent, $response);
@@ -169,7 +169,7 @@ class ToolTraceTest extends TestCase
     public function rejects_expectations_for_tools_the_agent_does_not_expose()
     {
         $agent = new TraceTestAgent([new TraceTestTool]);
-        $sample = Sample::fromResponse('hi', new AgentResponse('inv', 'done', new Usage, new Meta), $agent);
+        $sample = Sample::fromResponse('hi', new AgentResponse('inv', 'done', new TextUsage, new Meta), $agent);
 
         $this->expectException(InvalidArgumentException::class);
         $this->expectExceptionMessage('does not expose');
@@ -185,7 +185,7 @@ class ToolTraceTest extends TestCase
             new TraceTestPrefixedTool(new TraceTestMcpTool, prefix: 'contact'),
             new TraceTestPrefixedTool(new TraceTestMcpTool, prefix: 'team'),
         ]);
-        $sample = Sample::fromResponse('hi', new AgentResponse('inv', 'done', new Usage, new Meta), $agent);
+        $sample = Sample::fromResponse('hi', new AgentResponse('inv', 'done', new TextUsage, new Meta), $agent);
 
         $this->expectException(InvalidArgumentException::class);
         $this->expectExceptionMessage('several names');
@@ -213,7 +213,7 @@ class ToolTraceTest extends TestCase
     public function applies_evidence_checks_to_provider_tool_names_as_well_as_classes()
     {
         $agent = new TraceTestAgent([new WebSearch]);
-        $sample = Sample::fromResponse('hi', new AgentResponse('inv', 'done', new Usage, new Meta), $agent);
+        $sample = Sample::fromResponse('hi', new AgentResponse('inv', 'done', new TextUsage, new Meta), $agent);
 
         $this->expectException(IncompleteToolTraceException::class);
 
@@ -265,7 +265,7 @@ class ToolTraceTest extends TestCase
     {
         $agent = new TraceTestGeneratorAgent;
         iterator_to_array($agent->tools());
-        $response = (new AgentResponse('inv', 'done', new Usage, new Meta))
+        $response = (new AgentResponse('inv', 'done', new TextUsage, new Meta))
             ->withToolCallsAndResults(collect([new ToolCall('c1', 'trace_test_tool', ['id' => 'abc'])]), collect());
         $sample = Sample::fromResponse('hi', $response, $agent);
 
@@ -283,7 +283,7 @@ class ToolTraceTest extends TestCase
     {
         $agent = new TraceTestGeneratorAgent;
         iterator_to_array($agent->tools());
-        $response = (new AgentResponse('inv', 'done', new Usage, new Meta))
+        $response = (new AgentResponse('inv', 'done', new TextUsage, new Meta))
             ->withToolCallsAndResults(collect([
                 new ToolCall('c1', 'deferred_tool', []),
                 new ToolCall('c2', 'trace_test_tool', ['id' => 'abc']),
@@ -307,7 +307,7 @@ class ToolTraceTest extends TestCase
     {
         $agent = new TraceTestGeneratorAgent;
         iterator_to_array($agent->tools());
-        $response = (new AgentResponse('inv', 'done', new Usage, new Meta))
+        $response = (new AgentResponse('inv', 'done', new TextUsage, new Meta))
             ->withToolCallsAndResults(collect([
                 new ToolCall('c1', 'deferred_tool', []),
                 new ToolCall('c2', 'trace_test_tool', ['id' => 'abc']),
@@ -324,7 +324,7 @@ class ToolTraceTest extends TestCase
     public function does_not_mistake_a_regular_tool_for_a_provider_tool_by_name()
     {
         $agent = new TraceTestAgent([new TraceTestWebSearchDocumentsTool]);
-        $response = (new AgentResponse('inv', 'done', new Usage, new Meta))
+        $response = (new AgentResponse('inv', 'done', new TextUsage, new Meta))
             ->withToolCallsAndResults(collect([new ToolCall('c1', 'web_search_documents', ['query' => 'x'])]), collect());
         $sample = Sample::fromResponse('hi', $response, $agent);
 
@@ -387,7 +387,7 @@ class ToolTraceTest extends TestCase
     public function refuses_to_evaluate_provider_tools_without_raw_step_data()
     {
         $agent = new TraceTestAgent([new WebSearch]);
-        $sample = Sample::fromResponse('hi', new AgentResponse('inv', 'done', new Usage, new Meta), $agent);
+        $sample = Sample::fromResponse('hi', new AgentResponse('inv', 'done', new TextUsage, new Meta), $agent);
 
         $this->expectException(IncompleteToolTraceException::class);
 
@@ -414,7 +414,7 @@ class ToolTraceTest extends TestCase
      */
     private function step(array $raw, array $toolCalls): Step
     {
-        return (new Step('', $toolCalls, [], FinishReason::ToolCalls, new Usage, new Meta))
+        return (new Step('', $toolCalls, [], FinishReason::ToolCalls, new TextUsage, new Meta, '', []))
             ->withRawResponse(new HttpResponse(new PsrResponse(200, ['Content-Type' => 'application/json'], json_encode($raw))));
     }
 
@@ -425,7 +425,7 @@ class ToolTraceTest extends TestCase
     {
         $toolCalls = collect($steps)->flatMap(fn (Step $step) => $step->toolCalls);
 
-        return (new AgentResponse('inv', 'done', new Usage, new Meta))
+        return (new AgentResponse('inv', 'done', new TextUsage, new Meta))
             ->withToolCallsAndResults($toolCalls, collect())
             ->withSteps(collect($steps));
     }

@@ -6,7 +6,7 @@ use Illuminate\Support\Str;
 use Laravel\Ai\Contracts\Agent;
 use Laravel\Ai\Contracts\Tool;
 use Laravel\Ai\Responses\AgentResponse;
-use Laravel\Ai\Responses\Data\Usage;
+use Laravel\Ai\Responses\Data\TextUsage;
 use Laravel\Ai\Responses\StructuredAgentResponse;
 use Prashank\AiEvals\Support\Failover;
 use Prashank\AiEvals\Tools\ToolTrace;
@@ -21,7 +21,7 @@ final readonly class Sample
      * @param  string|null  $provider  The provider that produced the output, when the response reports it.
      * @param  string|null  $model  The model that produced the output, when the response reports it.
      * @param  array<int, Failover>  $failovers  Hops the SDK abandoned before this output was produced, in order.
-     * @param  Usage|null  $usage  Token usage summed across every step of the run, when the response reports it.
+     * @param  TextUsage|null  $usage  Token usage summed across every step of the run, when the response reports it.
      */
     public function __construct(
         public string $input,
@@ -31,7 +31,7 @@ final readonly class Sample
         public ?string $provider = null,
         public ?string $model = null,
         public array $failovers = [],
-        public ?Usage $usage = null,
+        public ?TextUsage $usage = null,
     ) {
         //
     }
