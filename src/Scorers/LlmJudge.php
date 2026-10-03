@@ -4,6 +4,7 @@ namespace Prashank\AiEvals\Scorers;
 
 use Prashank\AiEvals\Sample;
 use Prashank\AiEvals\Support\Judge;
+use Prashank\AiEvals\Tools\RecordedCall;
 
 /**
  * Scores the output against free-form natural language criteria.
@@ -31,6 +32,10 @@ final readonly class LlmJudge implements Scorer
 
         ## Output (what the agent responded)
         {$sample->output}
+
+        ## Tool calls (in order)
+        The output can be empty when the agent answered through a tool call alone.
+        {$this->toolCalls($sample)}
         MARKDOWN;
 
         if ($expected !== null) {
@@ -57,5 +62,16 @@ final readonly class LlmJudge implements Scorer
         - 0.1-0.3: Mostly fails to meet criteria
         - 0.0: Completely fails to meet criteria
         MARKDOWN;
+    }
+
+    private function toolCalls(Sample $sample): string
+    {
+        if ($sample->tools->calls === []) {
+            return 'None';
+        }
+
+        return collect($sample->tools->calls)
+            ->map(fn (RecordedCall $call): string => "- {$call->name}: ".json_encode($call->arguments, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE))
+            ->join("\n");
     }
 }

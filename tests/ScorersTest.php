@@ -4,6 +4,7 @@ namespace Prashank\AiEvals\Tests;
 
 use InvalidArgumentException;
 use Laravel\Ai\Embeddings;
+use Laravel\Ai\Prompts\AgentPrompt;
 use Laravel\Ai\StructuredAnonymousAgent;
 use PHPUnit\Framework\Attributes\Test;
 use Prashank\AiEvals\Sample;
@@ -13,6 +14,7 @@ use Prashank\AiEvals\Scorers\Relevance;
 use Prashank\AiEvals\Scorers\Safety;
 use Prashank\AiEvals\Scorers\ScorerResult;
 use Prashank\AiEvals\Scorers\SemanticSimilarity;
+use Prashank\AiEvals\Tools\RecordedCall;
 use Prashank\AiEvals\Tools\ToolTrace;
 
 class ScorersTest extends TestCase
@@ -28,6 +30,33 @@ class ScorersTest extends TestCase
         $this->assertSame(0.85, $result->score);
         $this->assertSame('Mostly right.', $result->reasoning);
         $this->assertSame(LlmJudge::class, $result->scorer);
+    }
+
+    #[Test]
+    public function llm_judge_sees_the_tool_calls_the_agent_made()
+    {
+        StructuredAnonymousAgent::fake([['score' => 1.0, 'reasoning' => 'Asked through the tool.']]);
+        $sample = new Sample('Tag them', '', new ToolTrace(exposed: [], calls: [
+            new RecordedCall('list_tags', null, [], 0),
+            new RecordedCall('request_user_input', null, ['question' => 'Which tag?'], 1),
+        ], providerDataAvailable: false));
+
+        (new LlmJudge('Asks which tag to use'))->score($sample);
+
+        StructuredAnonymousAgent::assertPrompted(fn (AgentPrompt $prompt): bool => str_contains(
+            $prompt->prompt,
+            "- list_tags: []\n- request_user_input: {\"question\":\"Which tag?\"}"
+        ));
+    }
+
+    #[Test]
+    public function llm_judge_says_when_no_tools_were_called()
+    {
+        StructuredAnonymousAgent::fake([['score' => 1.0, 'reasoning' => 'Fine.']]);
+
+        (new LlmJudge('Answers'))->score($this->sample('hi', 'hello'));
+
+        StructuredAnonymousAgent::assertPrompted(fn (AgentPrompt $prompt): bool => str_contains($prompt->prompt, "tool call alone.\nNone"));
     }
 
     #[Test]
